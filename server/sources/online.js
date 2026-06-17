@@ -2,13 +2,22 @@ import { config, features } from '../config.js';
 import { CATALOG } from '../catalog.js';
 
 // Búsqueda en el catálogo local (fallback sin clave de API).
+// A los productos "online" sin enlace se les añade una búsqueda de Google Shopping,
+// para que el botón "Ver oferta" de la app sea probable con datos de ejemplo.
 function searchCatalog(q) {
   const query = q.toLowerCase();
   return CATALOG.filter(
     (item) =>
       item.name.toLowerCase().includes(query) ||
       item.category.toLowerCase().includes(query)
-  );
+  ).map((item) => ({
+    ...item,
+    link:
+      item.link ||
+      (item.type === 'online'
+        ? `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(item.name)}`
+        : null),
+  }));
 }
 
 // FASE 2 — Búsqueda real de productos online vía SerpAPI (Google Shopping).
