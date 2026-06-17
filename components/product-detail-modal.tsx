@@ -1,8 +1,8 @@
 import React from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import type { Product } from '../lib/server';
-import { distanceMeters, formatDistance, hasPrice, canRoute } from '../lib/product';
-import { openOffer, openMapsForProduct, callPhone } from '../lib/links';
+import { distanceMeters, formatDistance, hasPrice } from '../lib/product';
+import { openBuy, openMapsForProduct, callPhone } from '../lib/links';
 
 type Props = {
   product: Product | null;
@@ -57,21 +57,24 @@ export default function ProductDetailModal({ product, visible, isFavorite, onTog
           )}
 
           <View style={styles.actions}>
-            {product.link && (
-              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => openOffer(product.link)}>
-                <Text style={styles.btnPrimaryText}>Ver oferta</Text>
+            {product.type === 'online' ? (
+              // Producto online -> enlace para comprarlo.
+              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => openBuy(product)}>
+                <Text style={styles.btnPrimaryText}>🛒 Comprar online</Text>
               </TouchableOpacity>
+            ) : (
+              // Producto cercano -> ubicación en Google Maps.
+              <>
+                <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => openMapsForProduct(product)}>
+                  <Text style={styles.btnPrimaryText}>📍 Ver en Google Maps</Text>
+                </TouchableOpacity>
+                {product.phone ? (
+                  <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={() => callPhone(product.phone)}>
+                    <Text style={styles.btnSecondaryText}>📞 Llamar a la tienda</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
             )}
-            {canRoute(product) && (
-              <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={() => openMapsForProduct(product)}>
-                <Text style={styles.btnSecondaryText}>Cómo llegar</Text>
-              </TouchableOpacity>
-            )}
-            {product.phone ? (
-              <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={() => callPhone(product.phone)}>
-                <Text style={styles.btnSecondaryText}>Llamar</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
         </ScrollView>
       </View>
