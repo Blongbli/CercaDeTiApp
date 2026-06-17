@@ -21,28 +21,29 @@ import { openMaps } from '../lib/links';
 import ProductCard from '../components/product-card';
 import ProductDetailModal from '../components/product-detail-modal';
 
-type TypeFilter = 'todos' | 'online' | 'cerca';
-type PriceRange = 'all' | 'low' | 'mid' | 'high';
-type SortOrder = 'asc' | 'desc';
-type Intent = 'today' | 'ahorrar' | 'cerca' | 'online' | null;
-type IntentKey = Exclude<Intent, null>;
+type ProductType = 'online' | 'cerca';
+type RangeKey = 'low' | 'mid' | 'high';
+type SortKey = 'cheap' | 'expensive' | 'near' | 'today';
 
-// Intenciones que fijan el TIPO de resultado (excluyentes entre sí).
-// '💰 ahorrar' no está aquí: solo cambia el orden, así que se combina con cualquiera.
-const LOCATION_INTENTS: readonly IntentKey[] = ['today', 'cerca', 'online'];
+// Grupo TIPO — multiselección. Sin nada marcado = todos.
+const TYPE_OPTIONS: { key: ProductType; label: string }[] = [
+  { key: 'online', label: '🌐 Online' },
+  { key: 'cerca', label: '📍 Cerca de ti' },
+];
 
-const PRICE_RANGES: { key: PriceRange; label: string; test: (p: number) => boolean }[] = [
-  { key: 'all', label: 'Todos', test: () => true },
+// Grupo PRECIO — multiselección (cumple si encaja en CUALQUIER rango marcado).
+const PRICE_PRESETS: { key: RangeKey; label: string; test: (p: number) => boolean }[] = [
   { key: 'low', label: '< 50 €', test: (p) => p < 50 },
   { key: 'mid', label: '50–150 €', test: (p) => p >= 50 && p <= 150 },
   { key: 'high', label: '+150 €', test: (p) => p > 150 },
 ];
 
-const INTENTS: { key: Exclude<Intent, null>; label: string }[] = [
-  { key: 'today', label: '⚡ Lo necesito hoy' },
-  { key: 'ahorrar', label: '💰 Quiero ahorrar' },
-  { key: 'cerca', label: '📍 Cerca de mí' },
-  { key: 'online', label: '🌐 Online' },
+// Grupo ORDENAR — selección única (solo se puede ordenar por un criterio).
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'cheap', label: '💰 Más barato' },
+  { key: 'expensive', label: '💸 Más caro' },
+  { key: 'near', label: '📍 Más cercano' },
+  { key: 'today', label: '⚡ Disponible hoy' },
 ];
 
 function sortDistanceOpen(list: Product[]): Product[] {
@@ -65,12 +66,12 @@ export default function HomeScreen() {
   const [summary, setSummary] = useState<string | null>(null);
   const [bestPickId, setBestPickId] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
-  const [filter, setFilter] = useState<TypeFilter>('todos');
-  const [priceRange, setPriceRange] = useState<PriceRange>('all');
+  // --- Filtros (todos combinables entre sí) ---
+  const [types, setTypes] = useState<Set<ProductType>>(new Set());
+  const [ranges, setRanges] = useState<Set<RangeKey>>(new Set());
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  const [intents, setIntents] = useState<Set<IntentKey>>(new Set());
+  const [sortBy, setSortBy] = useState<SortKey>('cheap');
   const [history, setHistory] = useState<string[]>([]);
   const [favKeys, setFavKeys] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<Product | null>(null);
@@ -153,65 +154,66 @@ export default function HomeScreen() {
     setFavKeys(new Set(favorites.map((f) => f.key)));
   };
 
-  // Activa/desactiva una intención. Se pueden tener varias a la vez; las de
-  // tipo (cerca/online/hoy) son excluyentes entre sí, pero '💰 ahorrar' se apila.
-  const applyIntent = (i: IntentKey) => {
-    setIntents((prev) => {
+  // --- Toggles de filtros (multiselección por grupo) ---
+  const toggleType = (k: ProductType) =>
+    setTypes((prev) => {
       const next = new Set(prev);
-      if (next.has(i)) {
-        next.delete(i);
-      } else {
-        next.add(i);
-        if (LOCATION_INTENTS.includes(i)) {
-          for (const other of LOCATION_INTENTS) if (other !== i) next.delete(other);
-        }
-      }
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+
+  const toggleRange = (k: RangeKey) => {
+    // Elegir un rango predefinido descarta el precio personalizado.
+    setMinPrice('');
+    setMaxPrice('');
+    setRanges((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
       return next;
     });
   };
 
-  const toggleSort = () => {
-    setSortOrder((s) => (s === 'asc' ? 'desc' : 'asc'));
-    // El orden manual manda: preserva el filtro "cerca" si venía de una intención
-    // de cercanía y quita las intenciones que controlan el orden.
-    if (intents.has('today') || intents.has('cerca')) setFilter('cerca');
-    setIntents((prev) => {
-      const next = new Set(prev);
-      next.delete('today');
-      next.delete('cerca');
-      next.delete('ahorrar');
-      return next;
-    });
+  const onChangeCustomPrice = (which: 'min' | 'max', text: string) => {
+    const clean = text.replace(/[^0-9.,]/g, '');
+    // El precio personalizado descarta los rangos predefinidos.
+    if (clean) setRanges(new Set());
+    (which === 'min' ? setMinPrice : setMaxPrice)(clean);
   };
 
-  // Tipo efectivo: una intención de cercanía/online manda sobre el filtro manual.
-  const typeFromIntent: TypeFilter | null = intents.has('online')
-    ? 'online'
-    : intents.has('cerca') || intents.has('today')
-      ? 'cerca'
-      : null;
-  const effectiveType: TypeFilter = typeFromIntent ?? filter;
-  const wantCheap = intents.has('ahorrar');
-  const wantDistance = (intents.has('today') || intents.has('cerca')) && !wantCheap;
+  const clearFilters = () => {
+    setTypes(new Set());
+    setRanges(new Set());
+    setMinPrice('');
+    setMaxPrice('');
+    setSortBy('cheap');
+  };
 
-  // Precio personalizado: si el usuario escribe un mínimo y/o un máximo, manda
-  // sobre los rangos predefinidos. Casilla vacía = sin límite por ese lado.
+  // --- Cálculo de resultados filtrados + ordenados ---
   const minVal = minPrice.trim() === '' ? 0 : Number(minPrice.replace(',', '.'));
   const maxVal = maxPrice.trim() === '' ? Infinity : Number(maxPrice.replace(',', '.'));
   const hasCustomPrice = minPrice.trim() !== '' || maxPrice.trim() !== '';
-  const passesPrice = (p: number) =>
-    hasCustomPrice
-      ? p >= (Number.isNaN(minVal) ? 0 : minVal) && p <= (Number.isNaN(maxVal) ? Infinity : maxVal)
-      : PRICE_RANGES.find((r) => r.key === priceRange)!.test(p);
 
-  const baseFiltered = results
-    .filter((item) => effectiveType === 'todos' || item.type === effectiveType)
-    .filter((item) => passesPrice(item.price));
-  const filteredResults = wantDistance
-    ? sortDistanceOpen(baseFiltered)
-    : [...baseFiltered].sort((a, b) =>
-        wantCheap ? a.price - b.price : sortOrder === 'asc' ? a.price - b.price : b.price - a.price
-      );
+  const passesType = (item: Product) => types.size === 0 || types.has(item.type as ProductType);
+  const passesPrice = (p: number) => {
+    if (hasCustomPrice) {
+      return p >= (Number.isNaN(minVal) ? 0 : minVal) && p <= (Number.isNaN(maxVal) ? Infinity : maxVal);
+    }
+    if (ranges.size === 0) return true;
+    return [...ranges].some((k) => PRICE_PRESETS.find((r) => r.key === k)!.test(p));
+  };
+
+  const baseFiltered = results.filter((item) => passesType(item) && passesPrice(item.price));
+  const filteredResults =
+    sortBy === 'today'
+      ? sortDistanceOpen(baseFiltered)
+      : sortBy === 'near'
+        ? [...baseFiltered].sort((a, b) => (distanceMeters(a) ?? Infinity) - (distanceMeters(b) ?? Infinity))
+        : [...baseFiltered].sort((a, b) => (sortBy === 'cheap' ? a.price - b.price : b.price - a.price));
+
+  // Filtros activos (para el contador y el botón "Limpiar"). El orden por
+  // defecto ('cheap') no cuenta como filtro activo.
+  const priceActive = hasCustomPrice ? 1 : ranges.size;
+  const activeCount = types.size + priceActive + (sortBy !== 'cheap' ? 1 : 0);
 
   const ctx = tagContextFor(filteredResults, bestPickId);
 
@@ -291,22 +293,6 @@ export default function HomeScreen() {
         returnKeyType="search"
       />
 
-      {/* Botones rápidos de intención */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.intentRow} contentContainerStyle={{ paddingRight: 8 }}>
-        {INTENTS.map((it) => {
-          const active = intents.has(it.key);
-          return (
-            <TouchableOpacity
-              key={it.key}
-              style={[styles.intentBtn, active && styles.intentBtnActive]}
-              onPress={() => applyIntent(it.key)}
-            >
-              <Text style={[styles.intentText, active && styles.intentTextActive]}>{it.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
       {/* Búsquedas recientes */}
       {history.length > 0 && (
         <View style={styles.recentWrap}>
@@ -324,89 +310,98 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* Filtro por tipo */}
-      <View style={styles.filterContainer}>
-        {(['todos', 'online', 'cerca'] as const).map((type) => (
-          <TouchableOpacity
-            key={type}
-            style={[styles.filterBtn, effectiveType === type && styles.filterBtnActive]}
-            onPress={() => {
-              setFilter(type);
-              // El filtro manual de tipo sustituye a las intenciones de tipo,
-              // pero conserva '💰 ahorrar' si estaba activo.
-              setIntents((prev) => {
-                const next = new Set(prev);
-                for (const k of LOCATION_INTENTS) next.delete(k);
-                return next;
-              });
-            }}
-          >
-            <Text style={[styles.filterText, effectiveType === type && styles.filterTextActive]}>
-              {type === 'todos' ? 'Todos' : type === 'online' ? 'Online' : 'Cerca de ti'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Filtro por precio + orden */}
-      <View style={styles.priceRow}>
-        {PRICE_RANGES.map((range) => {
-          const active = !hasCustomPrice && priceRange === range.key;
-          return (
-            <TouchableOpacity
-              key={range.key}
-              style={[styles.priceBtn, active && styles.priceBtnActive]}
-              onPress={() => {
-                setPriceRange(range.key);
-                // Al elegir un rango predefinido se limpia el precio personalizado.
-                setMinPrice('');
-                setMaxPrice('');
-              }}
-            >
-              <Text style={[styles.priceText, active && styles.priceTextActive]}>{range.label}</Text>
+      {/* ───── Panel de filtros (todos combinables) ───── */}
+      <View style={styles.filtersCard}>
+        <View style={styles.filtersHeader}>
+          <Text style={styles.filtersTitle}>
+            🎚️ Filtros{activeCount > 0 ? <Text style={styles.filtersBadge}> · {activeCount}</Text> : null}
+          </Text>
+          {activeCount > 0 && (
+            <TouchableOpacity onPress={clearFilters} hitSlop={8}>
+              <Text style={styles.filtersClear}>✕ Limpiar</Text>
             </TouchableOpacity>
-          );
-        })}
-        <TouchableOpacity style={styles.sortBtn} onPress={toggleSort}>
-          <Text style={styles.sortText}>{sortOrder === 'asc' ? '€ ↑' : '€ ↓'}</Text>
-        </TouchableOpacity>
-      </View>
+          )}
+        </View>
 
-      {/* Precio personalizado: el usuario escribe el mínimo y el máximo */}
-      <View style={styles.customPriceRow}>
-        <Text style={styles.customPriceLabel}>Precio €:</Text>
-        <TextInput
-          style={[styles.customPriceInput, hasCustomPrice && styles.customPriceInputActive]}
-          placeholder="0"
-          placeholderTextColor="#94a3b8"
-          keyboardType="numeric"
-          inputMode="numeric"
-          value={minPrice}
-          onChangeText={(t) => setMinPrice(t.replace(/[^0-9.,]/g, ''))}
-          returnKeyType="done"
-        />
-        <Text style={styles.customPriceDash}>—</Text>
-        <TextInput
-          style={[styles.customPriceInput, hasCustomPrice && styles.customPriceInputActive]}
-          placeholder="Sin límite"
-          placeholderTextColor="#94a3b8"
-          keyboardType="numeric"
-          inputMode="numeric"
-          value={maxPrice}
-          onChangeText={(t) => setMaxPrice(t.replace(/[^0-9.,]/g, ''))}
-          returnKeyType="done"
-        />
-        {hasCustomPrice && (
-          <TouchableOpacity
-            style={styles.customPriceClear}
-            onPress={() => {
-              setMinPrice('');
-              setMaxPrice('');
-            }}
-          >
-            <Text style={styles.customPriceClearText}>✕</Text>
-          </TouchableOpacity>
-        )}
+        {/* Tipo */}
+        <Text style={styles.groupLabel}>Tipo</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          {TYPE_OPTIONS.map((o) => {
+            const active = types.has(o.key);
+            return (
+              <TouchableOpacity
+                key={o.key}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => toggleType(o.key)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        <View style={styles.groupDivider} />
+
+        {/* Precio */}
+        <Text style={styles.groupLabel}>Precio</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          {PRICE_PRESETS.map((r) => {
+            const active = !hasCustomPrice && ranges.has(r.key);
+            return (
+              <TouchableOpacity
+                key={r.key}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => toggleRange(r.key)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{r.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        <View style={styles.customRow}>
+          <Text style={styles.customPrefix}>o de</Text>
+          <TextInput
+            style={[styles.customInput, hasCustomPrice && styles.customInputActive]}
+            placeholder="0"
+            placeholderTextColor="#94a3b8"
+            keyboardType="numeric"
+            inputMode="numeric"
+            value={minPrice}
+            onChangeText={(t) => onChangeCustomPrice('min', t)}
+            returnKeyType="done"
+          />
+          <Text style={styles.customDash}>a</Text>
+          <TextInput
+            style={[styles.customInput, hasCustomPrice && styles.customInputActive]}
+            placeholder="Sin límite"
+            placeholderTextColor="#94a3b8"
+            keyboardType="numeric"
+            inputMode="numeric"
+            value={maxPrice}
+            onChangeText={(t) => onChangeCustomPrice('max', t)}
+            returnKeyType="done"
+          />
+          <Text style={styles.customPrefix}>€</Text>
+        </View>
+
+        <View style={styles.groupDivider} />
+
+        {/* Ordenar */}
+        <Text style={styles.groupLabel}>Ordenar por</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          {SORT_OPTIONS.map((o) => {
+            const active = sortBy === o.key;
+            return (
+              <TouchableOpacity
+                key={o.key}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => setSortBy(o.key)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {loading ? (
@@ -462,39 +457,38 @@ const styles = StyleSheet.create({
     marginBottom: 12, fontSize: 16, color: '#0f172a',
     shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1,
   },
-  intentRow: { marginBottom: 10 },
-  intentBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 22, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', marginRight: 8 },
-  intentBtnActive: { backgroundColor: '#1e3a8a', borderColor: '#1e3a8a' },
-  intentText: { fontSize: 13, fontWeight: '700', color: '#334155' },
-  intentTextActive: { color: '#fff' },
   recentWrap: { marginBottom: 12 },
   recentLabel: { fontSize: 12, color: '#94a3b8', fontWeight: '700', alignSelf: 'center', marginRight: 8 },
   recentChip: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 16, backgroundColor: '#eef2f7', marginRight: 8 },
   recentChipText: { fontSize: 13, color: '#475569', fontWeight: '600' },
   recentClear: { paddingVertical: 6, paddingHorizontal: 10, alignSelf: 'center' },
   recentClearText: { fontSize: 12, color: '#dc2626', fontWeight: '600' },
-  filterContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  filterBtn: { flex: 1, paddingVertical: 10, marginHorizontal: 4, borderRadius: 25, backgroundColor: '#e2e8f0', alignItems: 'center' },
-  filterBtnActive: { backgroundColor: '#2563eb' },
-  filterText: { color: '#475569', fontSize: 13, fontWeight: '600' },
-  filterTextActive: { color: '#fff' },
-  priceRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  priceBtn: { paddingVertical: 7, paddingHorizontal: 10, marginRight: 6, borderRadius: 18, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0' },
-  priceBtnActive: { backgroundColor: '#16a34a', borderColor: '#16a34a' },
-  priceText: { color: '#475569', fontSize: 12, fontWeight: '600' },
-  priceTextActive: { color: '#fff' },
-  sortBtn: { marginLeft: 'auto', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 18, backgroundColor: '#0f172a' },
-  sortText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  customPriceRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  customPriceLabel: { fontSize: 12, color: '#475569', fontWeight: '700', marginRight: 8 },
-  customPriceInput: {
-    flex: 1, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12,
-    paddingVertical: 7, paddingHorizontal: 12, fontSize: 13, color: '#0f172a',
+
+  // Panel de filtros
+  filtersCard: {
+    backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e9eef5', padding: 14, marginBottom: 14,
+    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1,
   },
-  customPriceInputActive: { borderColor: '#16a34a', backgroundColor: '#f0fdf4' },
-  customPriceDash: { marginHorizontal: 8, color: '#94a3b8', fontWeight: '700' },
-  customPriceClear: { marginLeft: 8, width: 28, height: 28, borderRadius: 14, backgroundColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center' },
-  customPriceClearText: { color: '#475569', fontSize: 12, fontWeight: '800' },
+  filtersHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  filtersTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
+  filtersBadge: { color: '#2563eb', fontWeight: '800' },
+  filtersClear: { fontSize: 12, fontWeight: '700', color: '#dc2626' },
+  groupLabel: { fontSize: 11, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 8, marginBottom: 8 },
+  chipsRow: { paddingRight: 4 },
+  chip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0', marginRight: 8 },
+  chipActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  chipText: { fontSize: 13, fontWeight: '700', color: '#475569' },
+  chipTextActive: { color: '#fff' },
+  groupDivider: { height: 1, backgroundColor: '#f1f5f9', marginTop: 12 },
+  customRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  customPrefix: { fontSize: 13, color: '#64748b', fontWeight: '600' },
+  customInput: {
+    flex: 1, marginHorizontal: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12,
+    paddingVertical: 8, paddingHorizontal: 12, fontSize: 13, color: '#0f172a',
+  },
+  customInputActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  customDash: { color: '#94a3b8', fontWeight: '700' },
+
   aiBanner: { backgroundColor: '#eef2ff', borderRadius: 14, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#c7d2fe' },
   aiBadge: { fontSize: 12, fontWeight: '800', color: '#4f46e5', marginBottom: 6 },
   aiText: { fontSize: 14, color: '#312e81', lineHeight: 20 },
