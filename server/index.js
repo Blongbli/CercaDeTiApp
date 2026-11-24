@@ -5,6 +5,7 @@ import { searchOnline } from './sources/online.js';
 import { searchNearbyStores } from './sources/stores.js';
 import { rankItems } from './ranking.js';
 import { recommend } from './ai/recommend.js';
+import { chatWithGemini } from './ai/chat.js';
 import { makeCacheKey, getCache, setCache } from './cache.js';
 
 const app = express();
@@ -44,14 +45,16 @@ app.get('/buscar', async (req, res) => {
   const lat = req.query.lat != null && req.query.lat !== '' ? Number(req.query.lat) : null;
   const lng = req.query.lng != null && req.query.lng !== '' ? Number(req.query.lng) : null;
 
+  const intl = req.query.intl === '1' || req.query.intl === 'true';
+
   // Caché (clave con coords redondeadas a 2 decimales).
-  const cacheKey = makeCacheKey({ type: 'buscar', q, lat, lng });
+  const cacheKey = makeCacheKey({ type: 'buscar', q, lat, lng, intl });
   const cached = getCache(cacheKey);
   if (cached) return res.json({ ...cached, cached: true });
 
   try {
     const [online, places] = await Promise.all([
-      searchOnline(q),
+      searchOnline(q, { intl }),
       searchNearbyStores(q, lat, lng).catch((e) => {
         console.warn('[stores] error:', e.message);
         return { enabled: false, provider: config.placesProvider, stores: [] };
@@ -105,6 +108,26 @@ app.post('/recomendar', async (req, res) => {
       reason: String(e.message),
       provider: config.aiProvider,
     });
+  }
+});
+
+// CHAT — asistente de compras conversacional (IA bajo demanda).
+// POST /chat  body: { messages: [{role, content}], products?: [...] }
+app.post('/chat', async (req, res) => {
+  const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  const products = Array.isArray(req.body?.products) ? req.body.products.slice(0, 10) : null;
+  if (messages.length === 0) {
+    return res.status(400).json({ error: 'Envía "messages": [{ role, content }].' });
+  }
+  if (config.aiProvider !== 'gemini' || !config.geminiKey) {
+    return res.json({ reply: 'El asistente con IA no está configurado en el servidor.', provider: 'none' });
+  }
+  try {
+    const result = await chatWithGemini(messages, products);
+    res.json(result);
+  } catch (e) {
+    console.error('[chat] error:', e);
+    res.status(502).json({ reply: 'No pude responder ahora mismo. Inténtalo de nuevo.', provider: config.aiProvider });
   }
 });
 

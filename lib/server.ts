@@ -67,16 +67,65 @@ export async function clearServerUrl(): Promise<void> {
 
 type Coords = { latitude: number; longitude: number } | null;
 
-export async function searchProducts(query: string, coords: Coords): Promise<SearchResponse> {
+export async function searchProducts(query: string, coords: Coords, intl = false): Promise<SearchResponse> {
   const base = await getServerUrl();
   const params = new URLSearchParams({ q: query.trim() });
   if (coords) {
     params.set('lat', String(coords.latitude));
     params.set('lng', String(coords.longitude));
   }
+  if (intl) params.set('intl', '1');
   const res = await fetch(`${base}/buscar?${params.toString()}`);
   if (!res.ok) throw new Error(`Servidor respondió ${res.status}`);
   return (await res.json()) as SearchResponse;
+}
+
+export type Recommendation = {
+  recommendation: string;
+  bestProductId: string | null;
+  reason: string;
+  provider: string;
+};
+
+// IA bajo demanda ("Ayúdame a elegir"). Envía SOLO lo necesario (nunca la
+// ubicación exacta) y devuelve la recomendación del servidor.
+export async function recommendProducts(products: Product[]): Promise<Recommendation> {
+  const base = await getServerUrl();
+  const slim = products.slice(0, 10).map((p) => ({
+    id: p.id,
+    name: p.name,
+    price: p.price,
+    store: p.store,
+    type: p.type,
+    distanceMeters: p.distance ?? null,
+    rating: p.rating ?? null,
+    open: p.open ?? null,
+  }));
+  const res = await fetch(`${base}/recomendar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ products: slim }),
+  });
+  if (!res.ok) throw new Error(`Servidor respondió ${res.status}`);
+  return (await res.json()) as Recommendation;
+}
+
+export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
+// Asistente conversacional (IA). Manda el historial + productos visibles y
+// devuelve la respuesta del asistente.
+export async function sendChat(
+  messages: ChatMessage[],
+  products?: Product[]
+): Promise<{ reply: string; provider: string }> {
+  const base = await getServerUrl();
+  const res = await fetch(`${base}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, products: products?.slice(0, 10) }),
+  });
+  if (!res.ok) throw new Error(`Servidor respondió ${res.status}`);
+  return (await res.json()) as { reply: string; provider: string };
 }
 
 // Comprueba la conexión con el servidor y devuelve qué fuentes tiene activas.

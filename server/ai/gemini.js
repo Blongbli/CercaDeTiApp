@@ -3,7 +3,7 @@ import { config } from '../config.js';
 // IA externa vía Gemini REST (sin SDK, sin consumir RAM del portátil).
 // Solo se llama desde /recomendar, nunca automáticamente.
 export async function recommendWithGemini(products) {
-  const model = 'gemini-2.0-flash';
+  const model = 'gemini-2.5-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.geminiKey}`;
 
   const prompt =

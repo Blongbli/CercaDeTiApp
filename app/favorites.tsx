@@ -1,14 +1,19 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import type { Product } from '../lib/server';
 import { getFavorites, toggleFavorite, type Favorite } from '../lib/storage';
 import { tagContextFor, computeTags, productKey } from '../lib/product';
+import { useTheme, type ThemeColors } from '../lib/theme';
+import { useI18n } from '../lib/i18n';
 import ProductCard from '../components/product-card';
 import ProductDetailModal from '../components/product-detail-modal';
 
 export default function FavoritesScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const { t } = useI18n();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [detail, setDetail] = useState<Product | null>(null);
 
@@ -35,9 +40,9 @@ export default function FavoritesScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>❤️ Favoritos</Text>
+        <Text style={styles.title}>{t('fav.title')}</Text>
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.close}>Cerrar</Text>
+          <Text style={styles.close}>{t('common.close')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -54,11 +59,7 @@ export default function FavoritesScreen() {
             onPress={setDetail}
           />
         )}
-        ListEmptyComponent={
-          <Text style={styles.empty}>
-            Aún no tienes favoritos. Toca el corazón 🤍 en cualquier producto para guardarlo aquí.
-          </Text>
-        }
+        ListEmptyComponent={<Text style={styles.empty}>{t('fav.empty')}</Text>}
       />
 
       <ProductDetailModal
@@ -72,10 +73,11 @@ export default function FavoritesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc', paddingTop: 50 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 14 },
-  title: { fontSize: 22, fontWeight: '800', color: '#0f172a' },
-  close: { color: '#2563eb', fontWeight: '700', fontSize: 15 },
-  empty: { textAlign: 'center', marginTop: 80, color: '#94a3b8', fontSize: 14, paddingHorizontal: 30, lineHeight: 21 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.bg, paddingTop: 50 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 14 },
+    title: { fontSize: 22, fontWeight: '800', color: c.text },
+    close: { color: c.primary, fontWeight: '700', fontSize: 15 },
+    empty: { textAlign: 'center', marginTop: 80, color: c.textFaint, fontSize: 14, paddingHorizontal: 30, lineHeight: 21 },
+  });
